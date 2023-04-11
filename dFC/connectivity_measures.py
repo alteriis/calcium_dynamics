@@ -25,6 +25,9 @@ from matplotlib.backends.backend_agg import FigureCanvasAgg
 import pickle
 from skimage.measure import block_reduce
 
+# functions for dynamic functional connectivity analyses
+
+
 def create_connectivity_video(window_size,sample):
     
     n_time_points = np.shape(sample)[2]
@@ -78,6 +81,16 @@ def compute_eig5_trace(signals,window_size):
             eig5_trace[i,x] = eigenvalues[i]
         
     return eig5_trace
+
+def show_array(degree,H,W,good_indices,limits=None): # this fcn takes a linearized array of downsampled signals and re-plots it into an image, by filling with zero values outside. Good indices are the indices of the mask in the downsampled brain, H,W is the size of the downsampled image
+    degree_all = np.zeros(H*W)
+    degree_all[good_indices] = degree
+    fig,ax = plt.subplots()
+    if limits is not None:
+        ax.imshow(np.reshape(degree_all,(H,W)),vmin=limits[0],vmax=limits[1])
+    else:
+        ax.imshow(np.reshape(degree_all,(H,W)))
+    return fig
     
     
 def create_sample_video_with_mousecam(delta_f_directory, bodycam_directory, output_directory,sample_start,sample_length,window_size):
