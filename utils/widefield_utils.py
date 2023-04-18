@@ -882,3 +882,8 @@ def get_walking_series(base_directory,kernel_std,threshold):
     return walking
 
 
+def load_registered_sample(base_directory,registered_directory,start,end):
+    corrected_svt = np.load(os.path.join(base_directory, "Corrected_SVT.npy"))
+    u = np.load(os.path.join(registered_directory, "Registered_U.npy"))
+    delta_f_sample = np.dot(u, corrected_svt[:, start:end])
+    return delta_f_sample
