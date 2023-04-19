@@ -16,6 +16,9 @@ from skimage.measure import block_reduce
 import scipy
 import cv2
 
+from skimage.measure import label
+
+
 """
 def get_package_file_directory():
     cwd = pathlib.Path.cwd()
@@ -887,3 +890,16 @@ def load_registered_sample(base_directory,registered_directory,start,end):
     u = np.load(os.path.join(registered_directory, "Registered_U.npy"))
     delta_f_sample = np.dot(u, corrected_svt[:, start:end])
     return delta_f_sample
+
+def get_connected_components(signal,threshold): # this fcn outputs connected components of a logical signal which last longer than a threshold
+
+    connected_components = []
+    labels = label(signal) # this fcn labels connected components with integer numbers
+    n_components = labels.max()
+    
+    for i in range(n_components):
+        indexes = np.where(labels==i+1)[0] #i use i+1 because the first label is 0 is where there is "no" signal
+        if len(indexes)>threshold:
+            connected_components.append(indexes)
+            
+    return connected_components
