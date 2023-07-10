@@ -87,7 +87,8 @@ def show_array(degree,H,W,good_indices,limits=None): # this fcn takes a lineariz
     degree_all[good_indices] = degree
     fig,ax = plt.subplots()
     if limits is not None:
-        ax.imshow(np.reshape(degree_all,(H,W)),vmin=limits[0],vmax=limits[1])
+        ax.imshow(np.reshape(degree_all,(H,W)),vmin=limits[0],vmax=limits[1],cmap='bwr')
+        fig.colorbar(plt.cm.ScalarMappable(matplotlib.colors.Normalize(vmin=limits[0],vmax=limits[1]), cmap='bwr'), ax=ax)
     else:
         ax.imshow(np.reshape(degree_all,(H,W)))
     return fig
@@ -190,3 +191,129 @@ def create_sample_video_with_mousecam(delta_f_directory, bodycam_directory, outp
 
     cv2.destroyAllWindows()
     video.release()
+    
+def create_video_dFC(name,window_size,sample_start,sample_length,output_directory,n_clust,n_ica): # works with new ica t algo
+    
+    base_directory = r"/home/k21208334/calcium_analyses/data/" + name + "/"
+    bodycam_directory = base_directory
+    registered_directory = r"/home/k21208334/calcium_analyses/data/registration_data/" + name + "/"
+    leida_path = '/home/k21208334/calcium_analyses/data/leading_eigenvectors/window_size=' + str(window_size) + '/'
+    final_mask = np.load(r"/home/k21208334/calcium_analyses/data/dowsampled_tight_mask.npy")
+    good_indices = np.ravel(final_mask)
+    
+    leading_eigen = np.load(leida_path + name + '.npy')
+    labels = np.load(leida_path + name + '_k=' + str(n_clust) + '_ica_T=' + str(n_ica) + '_labels.npy')
+    centroids = np.load(leida_path + 'k=' + str(n_clust) + '_ica_T=' + str(n_ica) + '_centroids.npy')
+    
+    sample_end = sample_start + sample_length
+    leading_eigen = leading_eigen[sample_start:sample_end,:]
+    labels = labels[sample_start:sample_end]
+
+    # Get Delta F Sample
+    print("Getting Delta F Sample", datetime.now())
+    delta_f_sample = widefield_utils.get_delta_f_sample_from_svd(base_directory, sample_start, sample_end)
+    print("Finished Getting Delta F Sample", datetime.now())
+    
+    # get raw signals 
+    sample = widefield_utils.load_registered_sample(base_directory,registered_directory,sample_start,sample_end)
+    coarse_sample = block_reduce(sample, block_size=(6,6,1), func=np.mean) 
+    #  connectivity: flatten data
+    H = np.shape(coarse_sample)[0]
+    W = np.shape(coarse_sample)[1]
+    all_signals = np.reshape(coarse_sample,(H*W,sample_end))
+    # remove zero signals based on mask!
+    signals = all_signals[good_indices,:]
+
+    # Get Mousecam Sample
+    print("Getting Mousecam Sample", datetime.now())
+    bodycam_filename = widefield_utils.get_bodycam_filename(bodycam_directory);
+    eyecam_filename = widefield_utils.get_eyecam_filename(bodycam_directory);
+    bodycam_sample = widefield_utils.get_mousecam_sample(bodycam_directory, bodycam_filename, sample_start, sample_end);
+    eyecam_sample = widefield_utils.get_mousecam_sample(bodycam_directory, eyecam_filename, sample_start, sample_end);
+    print("Finished Getting Mousecam Sample", datetime.now())
+
+    # Create Colourmaps
+    widefield_colourmap = widefield_utils.get_musall_cmap();
+    widefield_colourmap = plt.cm.ScalarMappable(norm=Normalize(vmin=-0.05, vmax=0.05), cmap=widefield_colourmap)
+    mousecam_colourmap = plt.cm.ScalarMappable(norm=Normalize(vmin=0, vmax=255), cmap=cm.get_cmap('Greys_r'))
+
+    # Load Mask
+    indicies, image_height, image_width = widefield_utils.load_generous_mask(bodycam_directory);
+    background_pixels = widefield_utils.get_background_pixels(indicies, image_height, image_width);
+    print("Loaded Mask", datetime.now())
+
+    # Create Video File
+    video_name = os.path.join(output_directory, name+"_Brain_connect_Video.avi")
+    video_codec = cv2.VideoWriter_fourcc(*'DIVX')
+    video = cv2.VideoWriter(video_name, video_codec, frameSize=(1500, 500), fps=30)  # 0, 12
+
+    figure_1 = plt.figure(figsize=(15, 5))
+    canvas = FigureCanvasAgg(figure_1)
+    for frame_index in tqdm(range(sample_length)):
+
+        rows = 2
+        columns = 4
+        brain_axis = figure_1.add_subplot(rows, columns, 2)
+        body_axis = figure_1.add_subplot(rows, columns, 1)
+        eye_axis = figure_1.add_subplot(rows, columns, 5)
+        connectivity_axis = figure_1.add_subplot(rows,columns,4)
+        leida_axis = figure_1.add_subplot(rows,columns,3)
+        leida_matrix_axis = figure_1.add_subplot(rows,columns,8)
+        current_cluster_axis = figure_1.add_subplot(rows,columns,7)
+        
+        # Extract Frames
+        brain_frame = delta_f_sample[frame_index]
+        body_frame = bodycam_sample[frame_index]
+        eye_frame = eyecam_sample[frame_index]
+        # create connectivity matrix and use as frame 
+        connectivity_frame = get_instantaneous_matrix(window_size,signals,frame_index)
+        leida_frame = np.zeros(H*W)
+        leida_frame[good_indices] = leading_eigen[frame_index,:]
+        leida_frame = np.reshape(leida_frame,(H,W))
+        leida_frame = np.ma.masked_where(leida_frame == 0, leida_frame)
+        leida_matrix_frame = np.outer(leading_eigen[frame_index,:],leading_eigen[frame_index,:])
+        current_cluster_frame = np.zeros(H*W)
+        current_cluster_frame[good_indices] = centroids.T[labels[frame_index],:]
+        current_cluster_frame = np.reshape(current_cluster_frame,(H,W))
+        current_cluster_frame = np.ma.masked_where(current_cluster_frame == 0, current_cluster_frame)
+        
+        # Set Colours
+        brain_frame = widefield_colourmap.to_rgba(brain_frame)
+        body_frame = mousecam_colourmap.to_rgba(body_frame)
+        eye_frame = mousecam_colourmap.to_rgba(eye_frame)
+        #brain_frame[background_pixels] = (1,1,1,1)
+
+        # Display Images
+        brain_axis.imshow(brain_frame)
+        body_axis.imshow(body_frame)
+        eye_axis.imshow(eye_frame)
+        connectivity_axis.imshow(connectivity_frame,vmin=-1,vmax=1)
+        leida_axis.imshow(leida_frame,cmap='bwr')
+        leida_matrix_axis.imshow(leida_matrix_frame)
+        current_cluster_axis.imshow(current_cluster_frame,cmap='bwr')
+        
+        # Remove Axis
+        brain_axis.axis('off')
+        body_axis.axis('off')
+        eye_axis.axis('off')
+        connectivity_axis.axis('off')
+        leida_axis.axis('off')  
+        leida_matrix_axis.axis('off')
+        current_cluster_axis.axis('off')
+   
+        
+        figure_1.canvas.draw()
+
+        # Write To Video
+        canvas.draw()
+        buf = canvas.buffer_rgba()
+        image_from_plot = np.asarray(buf)
+        image_from_plot = cv2.cvtColor(image_from_plot, cv2.COLOR_RGB2BGR)
+        video.write(image_from_plot)
+
+
+        plt.clf()
+
+    cv2.destroyAllWindows()
+    video.release()
+
